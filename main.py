@@ -87,3 +87,92 @@ class JupScanConfig:
     request_timeout_sec: int = DEFAULT_REQUEST_TIMEOUT_SEC
     batch_size: int = DEFAULT_BATCH_SIZE
     log_level: str = "INFO"
+    cache_ttl_sec: int = DEFAULT_CACHE_TTL_SEC
+    config_dir: Path = field(default_factory=lambda: Path(os.environ.get(CONFIG_DIR_ENV, str(DEFAULT_CONFIG_DIR))))
+    networks: Dict[str, NetworkConfig] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.networks:
+            self.networks = {
+                "mainnet": NetworkConfig("Ethereum Mainnet", 1, DEFAULT_RPC_MAINNET, "https://etherscan.io", 12.0, "ETH"),
+                "sepolia": NetworkConfig("Sepolia", 11155111, DEFAULT_RPC_SEPOLIA, "https://sepolia.etherscan.io", 12.0, "ETH"),
+                "polygon": NetworkConfig("Polygon", 137, DEFAULT_RPC_POLYGON, "https://polygonscan.com", 2.0, "MATIC"),
+                "bsc": NetworkConfig("BSC", 56, DEFAULT_RPC_BSC, "https://bscscan.com", 3.0, "BNB"),
+                "arbitrum": NetworkConfig("Arbitrum One", 42161, DEFAULT_RPC_ARBITRUM, "https://arbiscan.io", 0.25, "ETH"),
+                "base": NetworkConfig("Base", 8453, DEFAULT_RPC_BASE, "https://basescan.org", 2.0, "ETH"),
+                "avalanche": NetworkConfig("Avalanche C-Chain", 43114, DEFAULT_RPC_AVALANCHE, "https://snowtrace.io", 2.0, "AVAX"),
+            }
+
+    def get_rpc_url(self) -> str:
+        if self.rpc_url:
+            return self.rpc_url
+        net = self.networks.get(self.network)
+        return net.rpc_url if net else DEFAULT_RPC_MAINNET
+
+    def get_chain_id(self) -> int:
+        net = self.networks.get(self.network)
+        return net.chain_id if net else self.chain_id
+
+    def get_explorer_url(self) -> str:
+        net = self.networks.get(self.network)
+        return net.explorer_url if net else "https://etherscan.io"
+
+    def get_config_path(self) -> Path:
+        return self.config_dir / "config.json"
+
+    def ensure_config_dir(self) -> Path:
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        return self.config_dir
+
+logger = logging.getLogger("JupScan")
+
+# ---------------------------------------------------------------------------
+# ABI (minimal) for JupiterScan contract
+# ---------------------------------------------------------------------------
+
+JUPITER_SCAN_ABI = [
+    {"inputs": [], "name": "pulseCounter", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "slotCounter", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "totalFeesCollected", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "totalRewardsPaid", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "emergencyPaused", "outputs": [{"type": "bool"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "pulseId", "type": "uint256"}], "name": "getPulse", "outputs": [
+        {"name": "scanner_", "type": "address"}, {"name": "trendHash_", "type": "bytes32"},
+        {"name": "magnitude_", "type": "uint256"}, {"name": "slotIndex_", "type": "uint256"},
+        {"name": "submitBlock_", "type": "uint256"}, {"name": "confirmed_", "type": "bool"},
+        {"name": "rejected_", "type": "bool"}, {"name": "confidenceScore_", "type": "uint256"},
+        {"name": "confirmBlock_", "type": "uint256"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "pulseId", "type": "uint256"}], "name": "getRewardForPulse", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "slotIndex", "type": "uint256"}], "name": "getSlot", "outputs": [
+        {"name": "startBlock_", "type": "uint256"}, {"name": "endBlock_", "type": "uint256"},
+        {"name": "pulseCount_", "type": "uint256"}, {"name": "totalMagnitude_", "type": "uint256"},
+        {"name": "winningMagnitude_", "type": "uint256"}, {"name": "closed_", "type": "bool"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "scanner", "type": "address"}], "name": "getScanner", "outputs": [
+        {"name": "stake_", "type": "uint256"}, {"name": "totalPulses_", "type": "uint256"},
+        {"name": "confirmedPulses_", "type": "uint256"}, {"name": "lastSubmitBlock_", "type": "uint256"},
+        {"name": "banned_", "type": "bool"}, {"name": "totalRewardsClaimed_", "type": "uint256"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "getSnapshot", "outputs": [
+        {"name": "pulseCount_", "type": "uint256"}, {"name": "slotCount_", "type": "uint256"},
+        {"name": "totalFees_", "type": "uint256"}, {"name": "totalRewards_", "type": "uint256"},
+        {"name": "balance_", "type": "uint256"}, {"name": "paused_", "type": "bool"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "trendHash", "type": "bytes32"}, {"name": "magnitude", "type": "uint256"}, {"name": "slotIndex", "type": "uint256"}],
+     "name": "submitPulse", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"name": "pulseId", "type": "uint256"}], "name": "claimReward", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [], "name": "registerScanner", "outputs": [], "stateMutability": "payable", "type": "function"},
+    {"inputs": [{"name": "pulseId", "type": "uint256"}], "name": "depositFee", "outputs": [], "stateMutability": "payable", "type": "function"},
+    {"inputs": [{"name": "scanner", "type": "address"}, {"name": "slotIndex", "type": "uint256"}], "name": "canSubmit", "outputs": [{"type": "bool"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "pulseId", "type": "uint256"}, {"name": "account", "type": "address"}], "name": "hasClaimed", "outputs": [{"type": "bool"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "getCurrentSlotIndex", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "getBalance", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "getProtocolVersion", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "getDomainSeal", "outputs": [{"type": "bytes32"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "pulseId", "type": "uint256"}], "name": "getPulseSummary", "outputs": [
+        {"name": "scanner_", "type": "address"}, {"name": "magnitude_", "type": "uint256"},
+        {"name": "slotIndex_", "type": "uint256"}, {"name": "confirmed_", "type": "bool"},
+        {"name": "rejected_", "type": "bool"}, {"name": "rewardAmount_", "type": "uint256"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "scanner", "type": "address"}], "name": "getClaimableRewardTotal", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
