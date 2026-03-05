@@ -710,3 +710,92 @@ class ReportGenerator:
         g = self.client.get_global_stats()
         data["stats"] = {
             "total_pulses": g.total_pulses,
+            "confirmed_pulses": g.confirmed_pulses,
+            "rejected_pulses": g.rejected_pulses,
+            "pending_pulses": g.pending_pulses,
+            "total_slots": g.total_slots,
+            "total_fees": g.total_fees,
+            "total_rewards": g.total_rewards,
+        }
+        if pulse_ids is None:
+            pulse_ids = list(range(1, min(self.client.contract.functions.pulseCounter().call() + 1, max_pulses + 1)))
+        for pid in pulse_ids:
+            try:
+                p = self.client.get_pulse(pid)
+                if p:
+                    data["pulses"].append({
+                        "pulse_id": p.pulse_id,
+                        "scanner": p.scanner,
+                        "trend_hash": p.trend_hash,
+                        "magnitude": p.magnitude,
+                        "slot_index": p.slot_index,
+                        "submit_block": p.submit_block,
+                        "confirmed": p.confirmed,
+                        "rejected": p.rejected,
+                        "confidence_score": p.confidence_score,
+                        "confirm_block": p.confirm_block,
+                    })
+            except Exception:
+                pass
+        return json.dumps(data, indent=2)
+
+def claim_all_claimable(client: JupiterScanClient, account: str) -> List[str]:
+    """Claim rewards for all claimable pulses for account. Returns list of tx hashes."""
+    ids = client.get_scanner_pulse_ids(account, 0, 500)
+    txs = []
+    for pid in ids:
+        if client.has_claimed(pid, account):
+            continue
+        try:
+            reward = client.get_reward_for_pulse(pid)
+            if reward and reward > 0:
+                tx = client.claim_reward(pid)
+                if tx:
+                    txs.append(tx)
+                    time.sleep(0.5)
+        except Exception as e:
+            logger.warning("Claim pulse %s failed: %s", pid, e)
+    return txs
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def cmd_status(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    snap = client.get_snapshot()
+    stats = client.get_global_stats()
+    print("JupiterScan status")
+    print("  Contract:", config.contract_address)
+    print("  Chain ID:", client.get_chain_id())
+    print("  Block:", client.get_block_number())
+    print("  Pulses:", snap.pulse_count)
+    print("  Slots:", snap.slot_count)
+    print("  Total fees:", snap.total_fees)
+    print("  Total rewards paid:", snap.total_rewards)
+    print("  Contract balance:", snap.balance)
+    print("  Paused:", snap.paused)
+    print("  Confirmed / Rejected / Pending:", stats.confirmed_pulses, stats.rejected_pulses, stats.pending_pulses)
+
+def cmd_pulse(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    p = client.get_pulse(args.pulse_id)
+    if not p:
+        print("Pulse not found")
+        sys.exit(1)
+    print("Pulse", p.pulse_id)
+    print("  Scanner:", p.scanner)
+    print("  Trend hash:", p.trend_hash)
+    print("  Magnitude:", p.magnitude)
+    print("  Slot:", p.slot_index)
+    print("  Submit block:", p.submit_block)
+    print("  Confirmed:", p.confirmed, " Rejected:", p.rejected)
+    print("  Confidence:", p.confidence_score)
+    print("  Confirm block:", p.confirm_block)
+    reward = client.get_reward_for_pulse(args.pulse_id)
