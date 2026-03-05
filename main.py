@@ -265,3 +265,92 @@ def trend_hash_bytes32_from_string(s: str) -> bytes:
     """Keccak256 of string as 32 bytes for contract call."""
     if not HAS_WEB3:
         import hashlib
+        return bytes.fromhex(hashlib.sha3_256(s.encode()).hexdigest())
+    return Web3.keccak(text=s)
+
+def category_to_bytes32(category: str) -> bytes:
+    if not HAS_WEB3:
+        import hashlib
+        return bytes.fromhex(hashlib.sha3_256(category.encode()).hexdigest())
+    return Web3.keccak(text=category)
+
+CATEGORY_MAP = {
+    "defi": TREND_CATEGORY_DEFI,
+    "nft": TREND_CATEGORY_NFT,
+    "meme": TREND_CATEGORY_MEME,
+    "gaming": TREND_CATEGORY_GAMING,
+    "other": TREND_CATEGORY_OTHER,
+}
+
+# ---------------------------------------------------------------------------
+# JupiterScan client
+# ---------------------------------------------------------------------------
+
+class JupiterScanClient:
+    def __init__(self, config: JupScanConfig, contract_address: Optional[str] = None) -> None:
+        self.config = config
+        self.contract_address = contract_address or config.contract_address
+        self._w3: Optional[Any] = None
+        self._contract: Optional[Any] = None
+        self._account = None
+        if not HAS_WEB3:
+            raise RuntimeError("web3 is required. Install with: pip install web3")
+        self._connect()
+
+    def _connect(self) -> None:
+        url = self.config.get_rpc_url()
+        self._w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": self.config.request_timeout_sec}))
+        if not self._w3.is_connected():
+            raise ConnectionError(f"Cannot connect to RPC: {url}")
+        if self.config.private_key:
+            self._account = self._w3.eth.account.from_key(self.config.private_key)
+        elif self.config.wallet_address:
+            self._account = self.config.wallet_address
+        if self.contract_address:
+            self._contract = self._w3.eth.contract(
+                address=Web3.to_checksum_address(self.contract_address),
+                abi=JUPITER_SCAN_ABI,
+            )
+
+    @property
+    def w3(self) -> Any:
+        if self._w3 is None:
+            self._connect()
+        return self._w3
+
+    @property
+    def contract(self) -> Any:
+        if self._contract is None:
+            raise ValueError("Contract address not set")
+        return self._contract
+
+    def get_chain_id(self) -> int:
+        return self.w3.eth.chain_id
+
+    def get_block_number(self) -> int:
+        return self.w3.eth.block_number
+
+    def get_snapshot(self) -> SnapshotData:
+        r = self.contract.functions.getSnapshot().call()
+        return SnapshotData(
+            pulse_count=r[0],
+            slot_count=r[1],
+            total_fees=r[2],
+            total_rewards=r[3],
+            balance=r[4],
+            paused=r[5],
+        )
+
+    def get_pulse(self, pulse_id: int) -> Optional[PulseData]:
+        r = self.contract.functions.getPulse(pulse_id).call()
+        if r[0] == "0x0000000000000000000000000000000000000000":
+            return None
+        return PulseData(
+            pulse_id=pulse_id,
+            scanner=r[0],
+            trend_hash=r[1].hex() if hasattr(r[1], "hex") else r[1],
+            magnitude=r[2],
+            slot_index=r[3],
+            submit_block=r[4],
+            confirmed=r[5],
+            rejected=r[6],
