@@ -176,3 +176,92 @@ JUPITER_SCAN_ABI = [
         {"name": "rejected_", "type": "bool"}, {"name": "rewardAmount_", "type": "uint256"}
     ], "stateMutability": "view", "type": "function"},
     {"inputs": [{"name": "scanner", "type": "address"}], "name": "getClaimableRewardTotal", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "trendHash", "type": "bytes32"}, {"name": "magnitude", "type": "uint256"}, {"name": "slotIndex", "type": "uint256"}, {"name": "categoryHash", "type": "bytes32"}],
+     "name": "submitPulseWithCategory", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"name": "slotIndex", "type": "uint256"}], "name": "getSlotBoundsView", "outputs": [
+        {"name": "startBlock", "type": "uint256"}, {"name": "endBlock", "type": "uint256"}, {"name": "closed", "type": "bool"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "scanner", "type": "address"}], "name": "getScannerPulseCount", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "scanner", "type": "address"}, {"name": "offset", "type": "uint256"}, {"name": "limit", "type": "uint256"}], "name": "getScannerPulseIds", "outputs": [{"name": "ids", "type": "uint256[]"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "getGlobalStats", "outputs": [
+        {"name": "totalPulses_", "type": "uint256"}, {"name": "confirmedPulses_", "type": "uint256"},
+        {"name": "rejectedPulses_", "type": "uint256"}, {"name": "pendingPulses_", "type": "uint256"},
+        {"name": "totalSlots_", "type": "uint256"}, {"name": "totalFees_", "type": "uint256"},
+        {"name": "totalRewards_", "type": "uint256"}
+    ], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "slotIndex", "type": "uint256"}], "name": "closeSlot", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"name": "slotIndex", "type": "uint256"}], "name": "ensureSlot", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+]
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PulseData:
+    pulse_id: int
+    scanner: str
+    trend_hash: str
+    magnitude: int
+    slot_index: int
+    submit_block: int
+    confirmed: bool
+    rejected: bool
+    confidence_score: int
+    confirm_block: int
+
+@dataclass
+class SlotData:
+    slot_index: int
+    start_block: int
+    end_block: int
+    pulse_count: int
+    total_magnitude: int
+    winning_magnitude: int
+    closed: bool
+
+@dataclass
+class ScannerData:
+    address: str
+    stake: int
+    total_pulses: int
+    confirmed_pulses: int
+    last_submit_block: int
+    banned: bool
+    total_rewards_claimed: int
+
+@dataclass
+class SnapshotData:
+    pulse_count: int
+    slot_count: int
+    total_fees: int
+    total_rewards: int
+    balance: int
+    paused: bool
+
+@dataclass
+class GlobalStatsData:
+    total_pulses: int
+    confirmed_pulses: int
+    rejected_pulses: int
+    pending_pulses: int
+    total_slots: int
+    total_fees: int
+    total_rewards: int
+
+# ---------------------------------------------------------------------------
+# Trend hashing
+# ---------------------------------------------------------------------------
+
+def trend_hash_from_string(s: str) -> str:
+    """Keccak256 of string, returned as 0x-prefixed hex (32 bytes)."""
+    if not HAS_WEB3:
+        import hashlib
+        h = hashlib.sha3_256(s.encode()).hexdigest()
+        return "0x" + h
+    return Web3.keccak(text=s).hex()
+
+def trend_hash_bytes32_from_string(s: str) -> bytes:
+    """Keccak256 of string as 32 bytes for contract call."""
+    if not HAS_WEB3:
+        import hashlib
