@@ -354,3 +354,92 @@ class JupiterScanClient:
             submit_block=r[4],
             confirmed=r[5],
             rejected=r[6],
+            confidence_score=r[7],
+            confirm_block=r[8],
+        )
+
+    def get_slot(self, slot_index: int) -> SlotData:
+        r = self.contract.functions.getSlot(slot_index).call()
+        return SlotData(
+            slot_index=slot_index,
+            start_block=r[0],
+            end_block=r[1],
+            pulse_count=r[2],
+            total_magnitude=r[3],
+            winning_magnitude=r[4],
+            closed=r[5],
+        )
+
+    def get_scanner(self, address: str) -> ScannerData:
+        addr = Web3.to_checksum_address(address)
+        r = self.contract.functions.getScanner(addr).call()
+        return ScannerData(
+            address=addr,
+            stake=r[0],
+            total_pulses=r[1],
+            confirmed_pulses=r[2],
+            last_submit_block=r[3],
+            banned=r[4],
+            total_rewards_claimed=r[5],
+        )
+
+    def get_global_stats(self) -> GlobalStatsData:
+        r = self.contract.functions.getGlobalStats().call()
+        return GlobalStatsData(
+            total_pulses=r[0],
+            confirmed_pulses=r[1],
+            rejected_pulses=r[2],
+            pending_pulses=r[3],
+            total_slots=r[4],
+            total_fees=r[5],
+            total_rewards=r[6],
+        )
+
+    def get_reward_for_pulse(self, pulse_id: int) -> int:
+        return self.contract.functions.getRewardForPulse(pulse_id).call()
+
+    def get_claimable_total(self, address: str) -> int:
+        addr = Web3.to_checksum_address(address)
+        return self.contract.functions.getClaimableRewardTotal(addr).call()
+
+    def can_submit(self, address: str, slot_index: int) -> bool:
+        addr = Web3.to_checksum_address(address)
+        return self.contract.functions.canSubmit(addr, slot_index).call()
+
+    def has_claimed(self, pulse_id: int, account: str) -> bool:
+        addr = Web3.to_checksum_address(account)
+        return self.contract.functions.hasClaimed(pulse_id, addr).call()
+
+    def get_current_slot_index(self) -> int:
+        return self.contract.functions.getCurrentSlotIndex().call()
+
+    def get_balance(self) -> int:
+        return self.contract.functions.getBalance().call()
+
+    def get_protocol_version(self) -> int:
+        return self.contract.functions.getProtocolVersion().call()
+
+    def _build_tx(self, fn: Callable, *args: Any, value: int = 0) -> Dict[str, Any]:
+        gas_estimate = fn(*args).estimate_gas({"from": self._account.address, "value": value})
+        gas = int(gas_estimate * self.config.gas_multiplier)
+        block = self.w3.eth.get_block("latest")
+        base_fee = block.get("baseFeePerGas", 0) or 0
+        max_priority = int(self.config.max_priority_fee_gwei * 1e9)
+        max_fee = min(
+            int(self.config.max_fee_per_gas_gwei * 1e9),
+            base_fee * 2 + max_priority,
+        )
+        return {
+            "from": self._account.address,
+            "value": value,
+            "gas": gas,
+            "maxFeePerGas": max_fee,
+            "maxPriorityFeePerGas": max_priority,
+        }
+
+    def register_scanner(self, value_wei: Optional[int] = None) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        value_wei = value_wei or JUPITER_SCAN_MIN_STAKE_WEI
+        if value_wei < JUPITER_SCAN_MIN_STAKE_WEI:
