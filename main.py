@@ -799,3 +799,92 @@ def cmd_pulse(config: JupScanConfig, args: argparse.Namespace) -> None:
     print("  Confidence:", p.confidence_score)
     print("  Confirm block:", p.confirm_block)
     reward = client.get_reward_for_pulse(args.pulse_id)
+    print("  Claimable reward:", reward)
+
+def cmd_slot(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    s = client.get_slot(args.slot_index)
+    print("Slot", s.slot_index)
+    print("  Start block:", s.start_block, " End block:", s.end_block)
+    print("  Pulse count:", s.pulse_count)
+    print("  Total magnitude:", s.total_magnitude)
+    print("  Winning magnitude:", s.winning_magnitude)
+    print("  Closed:", s.closed)
+
+def cmd_scanner(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    addr = args.address or (config.wallet_address or config.private_key)
+    if not addr:
+        print("Error: --address or wallet in config required")
+        sys.exit(1)
+    if hasattr(client._account, "address"):
+        addr = client._account.address
+    s = client.get_scanner(addr)
+    print("Scanner", s.address)
+    print("  Stake:", s.stake)
+    print("  Total pulses:", s.total_pulses)
+    print("  Confirmed:", s.confirmed_pulses)
+    print("  Last submit block:", s.last_submit_block)
+    print("  Banned:", s.banned)
+    print("  Total rewards claimed:", s.total_rewards_claimed)
+    claimable = client.get_claimable_total(addr)
+    print("  Claimable now:", claimable)
+
+def cmd_register(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address or not config.private_key:
+        print("Error: --contract and --private-key required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    value = args.value or JUPITER_SCAN_MIN_STAKE_WEI
+    tx = client.register_scanner(value_wei=value)
+    if tx:
+        print("Registered. Tx:", tx)
+    else:
+        print("Failed to register")
+        sys.exit(1)
+
+def cmd_submit(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address or not config.private_key:
+        print("Error: --contract and --private-key required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    trend = args.trend or "trend.other"
+    magnitude = args.magnitude or 1e16
+    slot = args.slot
+    if slot is None:
+        slot = client.get_current_slot_index()
+    category = args.category or "other"
+    if args.category_hash:
+        tx = client.submit_pulse_with_category(trend, magnitude, slot, category)
+    else:
+        tx = client.submit_pulse(trend_hash_bytes32_from_string(trend), magnitude, slot)
+    if tx:
+        print("Submitted. Tx:", tx)
+    else:
+        print("Failed to submit")
+        sys.exit(1)
+
+def cmd_claim(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address or not config.private_key:
+        print("Error: --contract and --private-key required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    tx = client.claim_reward(args.pulse_id)
+    if tx:
+        print("Claimed. Tx:", tx)
+    else:
+        print("Failed to claim")
+        sys.exit(1)
+
+def cmd_slots(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    current = client.get_current_slot_index()
