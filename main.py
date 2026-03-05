@@ -532,3 +532,92 @@ class JupiterScanClient:
         tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
         return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
 
+    def get_pulse_summary(self, pulse_id: int) -> Tuple[str, int, int, bool, bool, int]:
+        r = self.contract.functions.getPulseSummary(pulse_id).call()
+        return (r[0], r[1], r[2], r[3], r[4], r[5])
+
+    def get_scanner_pulse_ids(self, scanner: str, offset: int = 0, limit: int = 100) -> List[int]:
+        addr = Web3.to_checksum_address(scanner)
+        return list(self.contract.functions.getScannerPulseIds(addr, offset, limit).call())
+
+    def get_scanner_pulse_count(self, scanner: str) -> int:
+        addr = Web3.to_checksum_address(scanner)
+        return self.contract.functions.getScannerPulseCount(addr).call()
+
+    def get_slot_bounds(self, slot_index: int) -> Tuple[int, int, bool]:
+        return self.contract.functions.getSlotBoundsView(slot_index).call()
+
+# ---------------------------------------------------------------------------
+# CatCodeLive web interface client
+# ---------------------------------------------------------------------------
+
+try:
+    import urllib.request
+    import urllib.error
+    HAS_URLLIB = True
+except ImportError:
+    HAS_URLLIB = False
+
+class CatCodeLiveClient:
+    """HTTP client for CatCodeLive web interface (trend feeds, stats overlay)."""
+    def __init__(self, base_url: str = "http://localhost:8080", timeout: int = 15) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def _get(self, path: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        if not HAS_URLLIB:
+            return {"error": "urllib not available"}
+        url = self.base_url + path
+        if params:
+            from urllib.parse import urlencode
+            url += "?" + urlencode(params)
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.URLError as e:
+            return {"error": str(e)}
+        except json.JSONDecodeError as e:
+            return {"error": f"JSON: {e}"}
+
+    def get_dashboard(self) -> Dict[str, Any]:
+        return self._get("/api/dashboard")
+
+    def get_pulses_feed(self, limit: int = 20, slot_index: Optional[int] = None) -> Dict[str, Any]:
+        params = {"limit": str(limit)}
+        if slot_index is not None:
+            params["slot"] = str(slot_index)
+        return self._get("/api/pulses", params)
+
+    def get_slots_feed(self, limit: int = 10) -> Dict[str, Any]:
+        return self._get("/api/slots", {"limit": str(limit)})
+
+    def get_scanner_leaderboard(self, limit: int = 50) -> Dict[str, Any]:
+        return self._get("/api/leaderboard", {"limit": str(limit)})
+
+    def get_trend_summary(self) -> Dict[str, Any]:
+        return self._get("/api/trend-summary")
+
+    def get_contract_info(self) -> Dict[str, Any]:
+        return self._get("/api/contract-info")
+
+# ---------------------------------------------------------------------------
+# Batch fetcher and report generator
+# ---------------------------------------------------------------------------
+
+class BatchPulseFetcher:
+    def __init__(self, client: JupiterScanClient, batch_size: int = 50) -> None:
+        self.client = client
+        self.batch_size = batch_size
+
+    def fetch_all_pulses(self, max_pulses: Optional[int] = None) -> List[PulseData]:
+        snap = self.client.get_snapshot()
+        total = snap.pulse_count
+        if max_pulses is not None:
+            total = min(total, max_pulses)
+        if total == 0:
+            return []
+        out: List[PulseData] = []
+        for start in range(1, total + 1, self.batch_size):
+            end = min(start + self.batch_size, total + 1)
+            for pid in range(start, end):
