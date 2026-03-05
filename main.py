@@ -888,3 +888,92 @@ def cmd_slots(config: JupScanConfig, args: argparse.Namespace) -> None:
         sys.exit(1)
     client = JupiterScanClient(config)
     current = client.get_current_slot_index()
+    print("Current slot index:", current)
+    for i in range(min(args.limit, current + 3)):
+        try:
+            s = client.get_slot(i)
+            print(f"  Slot {i}: blocks {s.start_block}-{s.end_block} pulses={s.pulse_count} closed={s.closed}")
+        except Exception as e:
+            print(f"  Slot {i}: error {e}")
+
+def cmd_trend_hash(config: JupScanConfig, args: argparse.Namespace) -> None:
+    s = args.string or "trend.other"
+    h = trend_hash_from_string(s)
+    print("Trend hash:", h)
+
+def cmd_export(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    gen = ReportGenerator(client)
+    pulse_ids = getattr(args, "pulse_ids", None) or None
+    max_pulses = getattr(args, "max_pulses", 100) or 100
+    out = gen.export_json(pulse_ids, max_pulses=max_pulses)
+    if getattr(args, "output", None):
+        Path(args.output).write_text(out, encoding="utf-8")
+        print("Exported to", args.output)
+    else:
+        print(out)
+
+def cmd_list_pulses(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    limit = getattr(args, "limit", 20) or 20
+    slot = getattr(args, "slot_index", None)
+    snap = client.get_snapshot()
+    count = min(snap.pulse_count, limit)
+    for pid in range(1, count + 1):
+        try:
+            p = client.get_pulse(pid)
+            if not p:
+                continue
+            if slot is not None and p.slot_index != slot:
+                continue
+            print(f"  {p.pulse_id} slot={p.slot_index} mag={p.magnitude} conf={p.confirmed} rej={p.rejected} scanner={p.scanner[:10]}...")
+        except Exception:
+            pass
+
+def cmd_claim_all(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address or not config.private_key:
+        print("Error: --contract and --private-key required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    addr = client._account.address if hasattr(client._account, "address") else config.wallet_address
+    if not addr:
+        print("Error: no account")
+        sys.exit(1)
+    txs = claim_all_claimable(client, addr)
+    print("Claimed", len(txs), "rewards:", txs)
+
+def cmd_report(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    gen = ReportGenerator(client)
+    report_type = getattr(args, "report_type", "summary") or "summary"
+    if report_type == "summary":
+        print(gen.generate_summary_report())
+    elif report_type == "scanner" and getattr(args, "address", None):
+        print(gen.generate_scanner_report(args.address))
+    elif report_type == "slot" and getattr(args, "slot_index", None) is not None:
+        print(gen.generate_slot_report(args.slot_index))
+    else:
+        print(gen.generate_summary_report())
+
+def cmd_catcodelive(config: JupScanConfig, args: argparse.Namespace) -> None:
+    base = getattr(args, "base_url", "http://localhost:8080") or "http://localhost:8080"
+    cl = CatCodeLiveClient(base_url=base)
+    action = getattr(args, "action", "dashboard") or "dashboard"
+    if action == "dashboard":
+        print(json.dumps(cl.get_dashboard(), indent=2))
+    elif action == "pulses":
+        print(json.dumps(cl.get_pulses_feed(limit=getattr(args, "limit", 20)), indent=2))
+    elif action == "slots":
+        print(json.dumps(cl.get_slots_feed(limit=getattr(args, "limit", 10)), indent=2))
+    elif action == "leaderboard":
+        print(json.dumps(cl.get_scanner_leaderboard(limit=getattr(args, "limit", 50)), indent=2))
+    elif action == "trend":
