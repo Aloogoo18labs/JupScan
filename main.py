@@ -443,3 +443,92 @@ class JupiterScanClient:
             return None
         value_wei = value_wei or JUPITER_SCAN_MIN_STAKE_WEI
         if value_wei < JUPITER_SCAN_MIN_STAKE_WEI:
+            raise ValueError(f"Stake must be >= {JUPITER_SCAN_MIN_STAKE_WEI} wei")
+        fn = self.contract.functions.registerScanner()
+        tx_params = self._build_tx(fn, value=value_wei)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
+    def submit_pulse(self, trend_hash: Union[str, bytes], magnitude: int, slot_index: int) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        if isinstance(trend_hash, str):
+            if trend_hash.startswith("0x"):
+                h = bytes.fromhex(trend_hash[2:].zfill(64))
+            else:
+                h = trend_hash_bytes32_from_string(trend_hash)
+        else:
+            h = trend_hash if len(trend_hash) == 32 else bytes.fromhex(trend_hash.hex())
+        fn = self.contract.functions.submitPulse(h, magnitude, slot_index)
+        tx_params = self._build_tx(fn)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
+    def submit_pulse_with_category(self, trend_hash: Union[str, bytes], magnitude: int, slot_index: int, category: str) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        if isinstance(trend_hash, str) and not trend_hash.startswith("0x"):
+            h = trend_hash_bytes32_from_string(trend_hash)
+        elif isinstance(trend_hash, str):
+            h = bytes.fromhex(trend_hash[2:].zfill(64))
+        else:
+            h = trend_hash if len(trend_hash) == 32 else bytes.fromhex(trend_hash.hex())
+        cat = CATEGORY_MAP.get(category.lower(), TREND_CATEGORY_OTHER)
+        cat_bytes = category_to_bytes32(cat)
+        fn = self.contract.functions.submitPulseWithCategory(h, magnitude, slot_index, cat_bytes)
+        tx_params = self._build_tx(fn)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
+    def claim_reward(self, pulse_id: int) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        fn = self.contract.functions.claimReward(pulse_id)
+        tx_params = self._build_tx(fn)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
+    def deposit_fee(self, pulse_id: int, value_wei: int) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        fn = self.contract.functions.depositFee(pulse_id)
+        tx_params = self._build_tx(fn, value=value_wei)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
+    def ensure_slot(self, slot_index: int) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        fn = self.contract.functions.ensureSlot(slot_index)
+        tx_params = self._build_tx(fn)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
+    def close_slot(self, slot_index: int) -> Optional[str]:
+        if not self._account or not hasattr(self._account, "key"):
+            logger.warning("No private key; cannot send tx")
+            return None
+        fn = self.contract.functions.closeSlot(slot_index)
+        tx_params = self._build_tx(fn)
+        tx = fn.build_transaction(tx_params)
+        signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120).get("transactionHash").hex()
+
