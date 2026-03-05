@@ -1066,3 +1066,92 @@ def clamp_magnitude(mag: int) -> int:
     return min(max(mag, 1), max_mag)
 
 def parse_trend_input(s: str) -> bytes:
+    if s.startswith("0x") and len(s) == 66:
+        return bytes.fromhex(s[2:])
+    return trend_hash_bytes32_from_string(s)
+
+class SimpleCache:
+    """TTL cache for getSnapshot / getPulse to reduce RPC calls."""
+    def __init__(self, ttl_sec: int = 60) -> None:
+        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._ttl = ttl_sec
+
+    def get(self, key: str) -> Any:
+        if key not in self._cache:
+            return None
+        val, ts = self._cache[key]
+        if time.time() - ts > self._ttl:
+            del self._cache[key]
+            return None
+        return val
+
+    def set(self, key: str, value: Any) -> None:
+        self._cache[key] = (value, time.time())
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+def health_check(config: JupScanConfig) -> Tuple[bool, str]:
+    """Check RPC and optional contract. Returns (ok, message)."""
+    try:
+        if not HAS_WEB3:
+            return False, "web3 not installed"
+        client = JupiterScanClient(config)
+        _ = client.get_chain_id()
+        if config.contract_address:
+            _ = client.get_snapshot()
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
+
+def run_health_check(config: JupScanConfig) -> None:
+    ok, msg = health_check(config)
+    print("Health:", "OK" if ok else "FAIL", msg)
+
+def suggest_slot_for_block(client: JupiterScanClient, block_number: int) -> Optional[int]:
+    """Suggest slot index that contains the given block (if any)."""
+    try:
+        idx = client.get_current_slot_index()
+        for i in range(idx + 1):
+            start, end, closed = client.get_slot_bounds(i)
+            if start <= block_number <= end:
+                return i
+    except Exception:
+        pass
+    return None
+
+def format_reward_wei(wei: int) -> str:
+    if wei >= 1e18:
+        return f"{wei / 1e18:.4f} ETH"
+    if wei >= 1e15:
+        return f"{wei / 1e15:.2f} finney"
+    return f"{wei} wei"
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="JupScan - JupiterScan trend scanner client")
+    parser.add_argument("--config", type=Path, help="Config file path")
+    parser.add_argument("--rpc-url", dest="rpc_url", help="RPC URL")
+    parser.add_argument("--contract", help="JupiterScan contract address")
+    parser.add_argument("--private-key", dest="private_key", help="Wallet private key (hex)")
+    parser.add_argument("--network", default="mainnet", help="Network name")
+    parser.add_argument("--log-level", dest="log_level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    sub = parser.add_subparsers(dest="command", help="Command")
+
+    p_status = sub.add_parser("status", help="Contract status")
+    p_status.set_defaults(func=cmd_status)
+
+    p_pulse = sub.add_parser("pulse", help="Get pulse by ID")
+    p_pulse.add_argument("pulse_id", type=int)
+    p_pulse.set_defaults(func=cmd_pulse)
+
+    p_slot = sub.add_parser("slot", help="Get slot by index")
+    p_slot.add_argument("slot_index", type=int)
+    p_slot.set_defaults(func=cmd_slot)
+
+    p_slots = sub.add_parser("slots", help="List slots")
+    p_slots.add_argument("--limit", type=int, default=10)
+    p_slots.set_defaults(func=cmd_slots)
+
+    p_scanner = sub.add_parser("scanner", help="Scanner profile")
+    p_scanner.add_argument("--address", help="Scanner address")
+    p_scanner.set_defaults(func=cmd_scanner)
