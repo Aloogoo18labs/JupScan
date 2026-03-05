@@ -621,3 +621,92 @@ class BatchPulseFetcher:
         for start in range(1, total + 1, self.batch_size):
             end = min(start + self.batch_size, total + 1)
             for pid in range(start, end):
+                try:
+                    p = self.client.get_pulse(pid)
+                    if p:
+                        out.append(p)
+                except Exception as e:
+                    logger.debug("Skip pulse %s: %s", pid, e)
+        return out
+
+    def fetch_pulses_in_slot(self, slot_index: int) -> List[PulseData]:
+        slot = self.client.get_slot(slot_index)
+        out = []
+        count = 0
+        for pid in range(1, self.client.contract.functions.pulseCounter().call() + 1):
+            if count >= slot.pulse_count * 2:
+                break
+            try:
+                p = self.client.get_pulse(pid)
+                if p and p.slot_index == slot_index:
+                    out.append(p)
+                    count += 1
+            except Exception:
+                pass
+        return out
+
+class ReportGenerator:
+    def __init__(self, client: JupiterScanClient) -> None:
+        self.client = client
+
+    def generate_summary_report(self) -> str:
+        snap = self.client.get_snapshot()
+        stats = self.client.get_global_stats()
+        lines = [
+            "JupScan Summary Report",
+            "=====================",
+            f"Pulses: {snap.pulse_count}",
+            f"Slots: {snap.slot_count}",
+            f"Confirmed: {stats.confirmed_pulses}",
+            f"Rejected: {stats.rejected_pulses}",
+            f"Pending: {stats.pending_pulses}",
+            f"Total fees: {snap.total_fees}",
+            f"Total rewards: {snap.total_rewards}",
+            f"Contract balance: {snap.balance}",
+            f"Paused: {snap.paused}",
+        ]
+        return "\n".join(lines)
+
+    def generate_scanner_report(self, address: str) -> str:
+        s = self.client.get_scanner(address)
+        claimable = self.client.get_claimable_total(address)
+        lines = [
+            f"Scanner {address}",
+            "===============",
+            f"Stake: {s.stake}",
+            f"Total pulses: {s.total_pulses}",
+            f"Confirmed: {s.confirmed_pulses}",
+            f"Last submit block: {s.last_submit_block}",
+            f"Banned: {s.banned}",
+            f"Total rewards claimed: {s.total_rewards_claimed}",
+            f"Claimable now: {claimable}",
+        ]
+        return "\n".join(lines)
+
+    def generate_slot_report(self, slot_index: int) -> str:
+        s = self.client.get_slot(slot_index)
+        lines = [
+            f"Slot {slot_index}",
+            "===========",
+            f"Start block: {s.start_block}",
+            f"End block: {s.end_block}",
+            f"Pulse count: {s.pulse_count}",
+            f"Total magnitude: {s.total_magnitude}",
+            f"Winning magnitude: {s.winning_magnitude}",
+            f"Closed: {s.closed}",
+        ]
+        return "\n".join(lines)
+
+    def export_json(self, pulse_ids: Optional[List[int]] = None, max_pulses: int = 100) -> str:
+        data: Dict[str, Any] = {"snapshot": None, "stats": None, "pulses": []}
+        data["snapshot"] = {
+            "pulse_count": self.client.get_snapshot().pulse_count,
+            "slot_count": self.client.get_snapshot().slot_count,
+            "total_fees": self.client.get_snapshot().total_fees,
+            "total_rewards": self.client.get_snapshot().total_rewards,
+            "balance": self.client.get_snapshot().balance,
+            "paused": self.client.get_snapshot().paused,
+        }
+        g = self.client.get_global_stats()
+        data["stats"] = {
+            "total_pulses": g.total_pulses,
