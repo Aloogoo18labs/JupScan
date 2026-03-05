@@ -977,3 +977,92 @@ def cmd_catcodelive(config: JupScanConfig, args: argparse.Namespace) -> None:
     elif action == "leaderboard":
         print(json.dumps(cl.get_scanner_leaderboard(limit=getattr(args, "limit", 50)), indent=2))
     elif action == "trend":
+        print(json.dumps(cl.get_trend_summary(), indent=2))
+    else:
+        print(json.dumps(cl.get_dashboard(), indent=2))
+
+def cmd_watch(config: JupScanConfig, args: argparse.Namespace) -> None:
+    if not config.contract_address:
+        print("Error: --contract required")
+        sys.exit(1)
+    client = JupiterScanClient(config)
+    interval = getattr(args, "interval", 12) or 12
+    last_count = 0
+    try:
+        while True:
+            snap = client.get_snapshot()
+            if snap.pulse_count != last_count:
+                print(time.strftime("%Y-%m-%d %H:%M:%S"), "pulses:", snap.pulse_count, "slots:", snap.slot_count)
+                last_count = snap.pulse_count
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print("Stopped")
+
+def wei_to_eth(wei: int) -> float:
+    return wei / 1e18
+
+def format_wei(wei: int) -> str:
+    return f"{wei_to_eth(wei):.6f} ETH"
+
+def format_pulse_short(p: PulseData) -> str:
+    return f"#{p.pulse_id} slot={p.slot_index} mag={p.magnitude} conf={p.confirmed}"
+
+def format_slot_short(s: SlotData) -> str:
+    return f"slot {s.slot_index} blocks {s.start_block}-{s.end_block} pulses={s.pulse_count} closed={s.closed}"
+
+def load_config_from_env() -> JupScanConfig:
+    c = JupScanConfig()
+    c.contract_address = os.environ.get("JUPSCAN_CONTRACT")
+    c.rpc_url = os.environ.get("JUPSCAN_RPC_URL")
+    c.private_key = os.environ.get("JUPSCAN_PRIVATE_KEY")
+    c.network = os.environ.get("JUPSCAN_NETWORK", "mainnet")
+    return c
+
+def save_config(config: JupScanConfig, path: Optional[Path] = None) -> None:
+    path = path or config.get_config_path()
+    config.ensure_config_dir()
+    data = {
+        "network": config.network,
+        "rpc_url": config.rpc_url,
+        "contract_address": config.contract_address,
+        "wallet_address": config.wallet_address,
+    }
+    if config.private_key:
+        data["private_key"] = config.private_key
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+def load_config_file(path: Path) -> JupScanConfig:
+    c = JupScanConfig()
+    if not path.exists():
+        return c
+    data = json.loads(path.read_text(encoding="utf-8"))
+    c.network = data.get("network", c.network)
+    c.rpc_url = data.get("rpc_url")
+    c.contract_address = data.get("contract_address")
+    c.private_key = data.get("private_key")
+    c.wallet_address = data.get("wallet_address")
+    return c
+
+def validate_contract_address(addr: Optional[str]) -> bool:
+    if not addr:
+        return False
+    if not HAS_WEB3:
+        return len(addr) == 42 and addr.startswith("0x")
+    try:
+        Web3.to_checksum_address(addr)
+        return True
+    except Exception:
+        return False
+
+def get_default_magnitude_for_tier(tier: int) -> int:
+    if tier == 1:
+        return 10**16
+    if tier == 2:
+        return 10**17
+    return 10**18
+
+def clamp_magnitude(mag: int) -> int:
+    max_mag = 10**18
+    return min(max(mag, 1), max_mag)
+
+def parse_trend_input(s: str) -> bytes:
