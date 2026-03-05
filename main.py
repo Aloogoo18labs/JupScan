@@ -1155,3 +1155,83 @@ def main() -> None:
     p_scanner = sub.add_parser("scanner", help="Scanner profile")
     p_scanner.add_argument("--address", help="Scanner address")
     p_scanner.set_defaults(func=cmd_scanner)
+
+    p_register = sub.add_parser("register", help="Register as scanner (stake)")
+    p_register.add_argument("--value", type=int, help="Stake in wei")
+    p_register.set_defaults(func=cmd_register)
+
+    p_submit = sub.add_parser("submit", help="Submit pulse")
+    p_submit.add_argument("--trend", help="Trend string for hash")
+    p_submit.add_argument("--magnitude", type=float, help="Magnitude (e.g. 1e16)")
+    p_submit.add_argument("--slot", type=int, help="Slot index")
+    p_submit.add_argument("--category", default="other", help="Category: defi, nft, meme, gaming, other")
+    p_submit.add_argument("--category-hash", dest="category_hash", action="store_true", help="Use category hash (submitPulseWithCategory)")
+    p_submit.set_defaults(func=cmd_submit)
+
+    p_claim = sub.add_parser("claim", help="Claim reward for pulse")
+    p_claim.add_argument("pulse_id", type=int)
+    p_claim.set_defaults(func=cmd_claim)
+
+    p_trend_hash = sub.add_parser("trend-hash", help="Compute trend hash for string")
+    p_trend_hash.add_argument("string", nargs="?", help="String to hash")
+    p_trend_hash.set_defaults(func=cmd_trend_hash)
+
+    p_export = sub.add_parser("export", help="Export pulses/snapshot to JSON")
+    p_export.add_argument("--output", "-o", help="Output file")
+    p_export.add_argument("--max-pulses", type=int, default=100, help="Max pulses to export")
+    p_export.set_defaults(func=cmd_export)
+
+    p_list = sub.add_parser("list-pulses", help="List pulses")
+    p_list.add_argument("--limit", type=int, default=20)
+    p_list.add_argument("--slot-index", type=int, help="Filter by slot")
+    p_list.set_defaults(func=cmd_list_pulses)
+
+    p_claim_all = sub.add_parser("claim-all", help="Claim all claimable rewards")
+    p_claim_all.set_defaults(func=cmd_claim_all)
+
+    p_report = sub.add_parser("report", help="Generate report")
+    p_report.add_argument("report_type", nargs="?", default="summary", choices=["summary", "scanner", "slot"])
+    p_report.add_argument("--address", help="For scanner report")
+    p_report.add_argument("--slot-index", type=int, help="For slot report")
+    p_report.set_defaults(func=cmd_report)
+
+    p_catcodelive = sub.add_parser("catcodelive", help="Query CatCodeLive web API")
+    p_catcodelive.add_argument("action", nargs="?", default="dashboard", choices=["dashboard", "pulses", "slots", "leaderboard", "trend"])
+    p_catcodelive.add_argument("--base-url", default="http://localhost:8080")
+    p_catcodelive.add_argument("--limit", type=int, default=20)
+    p_catcodelive.set_defaults(func=cmd_catcodelive)
+
+    p_watch = sub.add_parser("watch", help="Watch contract pulse count")
+    p_watch.add_argument("--interval", type=int, default=12)
+    p_watch.set_defaults(func=cmd_watch)
+
+    p_health = sub.add_parser("health", help="Health check RPC and contract")
+    p_health.set_defaults(func=lambda c, a: run_health_check(c))
+
+    args = parser.parse_args()
+    logging.basicConfig(level=getattr(logging, args.log_level))
+
+    config = JupScanConfig()
+    if args.config and args.config.exists():
+        with open(args.config) as f:
+            data = json.load(f)
+            config.rpc_url = data.get("rpc_url") or config.rpc_url
+            config.contract_address = data.get("contract_address") or config.contract_address
+            config.private_key = data.get("private_key") or config.private_key
+            config.network = data.get("network", config.network)
+    if args.rpc_url:
+        config.rpc_url = args.rpc_url
+    if args.contract:
+        config.contract_address = args.contract
+    if args.private_key:
+        config.private_key = args.private_key
+    if args.network:
+        config.network = args.network
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+    args.func(config, args)
+
+if __name__ == "__main__":
+    main()
